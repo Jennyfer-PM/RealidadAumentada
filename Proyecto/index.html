@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Proyecto de Realidad Aumentada</title>
+
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            touch-action: none; /* para que los gestos no hagan scroll/zoom de la página */
+        }
+
+        #debug {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 9999;
+            padding: 6px 8px;
+            font: 11px/1.4 monospace;
+            color: #fff;
+            background: rgba(0, 0, 0, .65);
+            pointer-events: none;
+            white-space: pre-line;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="debug"></div>
+
+    <a-scene
+        embedded
+        vr-mode-ui="enabled: false"
+        loading-screen="enabled: false"
+        renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true;"
+        arjs="sourceType: webcam;
+              trackingMethod: best;
+              sourceWidth: 1280;
+              sourceHeight: 960;
+              displayWidth: 1280;
+              displayHeight: 960;
+              debugUIEnabled: false;">
+
+        <a-assets>
+            <a-asset-item id="modelo-mariposa" src="./models/mariposa.glb"></a-asset-item>
+            <a-asset-item id="modelo-pez"      src="./models/pez.glb"></a-asset-item>
+            <a-asset-item id="modelo-conejo"   src="./models/conejo.glb"></a-asset-item>
+            <a-asset-item id="modelo-colibri"  src="./models/colibri.glb"></a-asset-item>
+            <a-asset-item id="modelo-tortuga"  src="./models/tortuga.glb"></a-asset-item>
+            <a-asset-item id="modelo-gorrion"  src="./models/gorrion.glb"></a-asset-item>
+        </a-assets>
+
+        <!-- Luces para que los modelos se vean con volumen -->
+        <a-light type="ambient" color="#ffffff" intensity="1.1"></a-light>
+        <a-light type="directional" color="#ffffff" intensity="0.9" position="1 3 2"></a-light>
+
+        <!--
+          Cada animal tiene:
+            - a-marker: el marcador
+            - .contenedor: lo que se mueve con los dedos (girar / agrandar)
+            - la entidad del modelo: "ajustar" lo escala solo para que mida lo mismo
+              que los demás (tamano = tamaño máximo; 1 = igual que el marcador).
+        -->
+
+        <a-marker data-name="mariposa" type="pattern" url="./markers/mariposa.patt" emitevents="true" smooth="true">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-mariposa" ajustar="tamano: 1"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <a-marker data-name="pez" type="pattern" url="./markers/pez.patt" emitevents="true" smooth="true">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-pez" ajustar="tamano: 0.8"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <!-- El conejo viene "acostado" (eje Z hacia arriba), por eso rotation -90 0 0 -->
+        <a-marker data-name="conejo" type="pattern" url="./markers/conejo.patt" emitevents="true" smooth="true" minConfidence="0.8">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-conejo" rotation="-90 0 0" ajustar="tamano: 0.9"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <a-marker data-name="colibri" type="pattern" url="./markers/colibri.patt" emitevents="true" smooth="true">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-colibri" ajustar="tamano: 0.8"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <a-marker data-name="tortuga" type="pattern" url="./markers/tortuga.patt" emitevents="true" smooth="true">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-tortuga" ajustar="tamano: 0.9"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <a-marker data-name="gorrion" type="pattern" url="./markers/gorrion.patt" emitevents="true" smooth="true">
+            <a-entity class="contenedor">
+                <a-entity gltf-model="#modelo-gorrion" ajustar="tamano: 0.8"></a-entity>
+            </a-entity>
+        </a-marker>
+
+        <a-entity camera></a-entity>
+
+    </a-scene>
+
+    <script>
+        // ---------------------------------------------------------------
+        // 1) Ajusta cada modelo a un tamaño estándar, centrado y apoyado
+        //    sobre el marcador (los .glb vienen con tamaños muy distintos).
+        // ---------------------------------------------------------------
+        AFRAME.registerComponent('ajustar', {
+            schema: { tamano: { type: 'number', default: 1 } },
+
+            init: function () {
+                this.el.addEventListener('model-loaded', () => this.ajustar());
+            },
+
+            ajustar: function () {
+                const THREE = AFRAME.THREE;
+                const el = this.el;
+                const obj = el.getObject3D('mesh');
+                if (!obj) return;
+
+                // Caja del modelo en su propio sistema de coordenadas
+                obj.updateMatrixWorld(true);
+                const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+                const caja = new THREE.Box3();
+                obj.traverse(m => {
+                    if (m.isMesh && m.geometry) {
+                        m.geometry.computeBoundingBox();
+                        const rel = new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld);
+                        caja.union(m.geometry.boundingBox.clone().applyMatrix4(rel));
+                    }
+                });
+                if (caja.isEmpty()) return;
+
+                // Aplicar solo la rotación propia de la entidad (p. ej. el conejo)
+                const q = el.object3D.quaternion;
+                const rotada = new THREE.Box3();
+                for (let i = 0; i < 8; i++) {
+                    const v = new THREE.Vector3(
+                        (i & 1) ? caja.max.x : caja.min.x,
+                        (i & 2) ? caja.max.y : caja.min.y,
+                        (i & 4) ? caja.max.z : caja.min.z
+                    ).applyQuaternion(q);
+                    rotada.expandByPoint(v);
+                }
+
+                const tam = rotada.getSize(new THREE.Vector3());
+                const centro = rotada.getCenter(new THREE.Vector3());
+                const s = this.data.tamano / Math.max(tam.x, tam.y, tam.z);
+
+                // El modelo queda centrado dentro del contenedor, y el contenedor
+                // se sube la mitad de la altura: así se apoya en el marcador
+                // pero gira sobre su propio centro.
+                el.object3D.scale.setScalar(s);
+                el.object3D.position.set(-centro.x * s, -centro.y * s, -centro.z * s);
+                el.object3D.parent.position.y = (tam.y * s) / 2;
+            }
+        });
+
+        // ---------------------------------------------------------------
+        // 2) Gestos: un dedo = girar, dos dedos (pellizco) = agrandar/achicar
+        // ---------------------------------------------------------------
+        const activos = new Set();   // contenedores de los marcadores visibles
+        const limitar = (v, a, b) => Math.min(b, Math.max(a, v));
+        let ultimo = null, distInicial = 0;
+
+        // Gira el contenedor alrededor de un eje de la PANTALLA (arriba o derecha),
+        // sin importar cómo esté inclinado el marcador.
+        function girar(o, ejePantalla, angulo) {
+            const THREE = AFRAME.THREE;
+            const camara = document.querySelector('a-scene').camera;
+            const qCam = new THREE.Quaternion();
+            if (camara) camara.getWorldQuaternion(qCam);
+            const eje = ejePantalla.clone().applyQuaternion(qCam);        // eje en el mundo
+            const qPadre = new THREE.Quaternion();
+            o.parent.getWorldQuaternion(qPadre);
+            eje.applyQuaternion(qPadre.invert()).normalize();              // eje en el marcador
+            o.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(eje, angulo));
+        }
+        const ARRIBA = () => new AFRAME.THREE.Vector3(0, 1, 0);
+        const DERECHA = () => new AFRAME.THREE.Vector3(1, 0, 0);
+
+        const distancia = t => Math.hypot(
+            t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+        document.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                ultimo = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                ultimo = null;
+                distInicial = distancia(e.touches);
+                activos.forEach(o => { o.userData.escalaBase = o.scale.x; });
+            }
+        }, { passive: false });
+
+        document.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length === 1 && ultimo) {
+                const dx = e.touches[0].clientX - ultimo.x;
+                const dy = e.touches[0].clientY - ultimo.y;
+                ultimo = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                activos.forEach(o => {
+                    girar(o, ARRIBA(), dx * 0.012);
+                    girar(o, DERECHA(), dy * 0.012);
+                });
+            } else if (e.touches.length === 2 && distInicial > 0) {
+                const factor = distancia(e.touches) / distInicial;
+                activos.forEach(o => {
+                    o.scale.setScalar(limitar((o.userData.escalaBase || 1) * factor, 0.3, 4));
+                });
+            }
+        }, { passive: false });
+
+        document.addEventListener('touchend', e => {
+            if (e.touches.length === 1) {
+                ultimo = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else {
+                ultimo = null;
+            }
+            distInicial = 0;
+        });
+
+        // Doble toque = volver a la posición y tamaño originales
+        let ultimoToque = 0;
+        document.addEventListener('touchend', e => {
+            if (e.touches.length > 0) return;
+            const ahora = Date.now();
+            if (ahora - ultimoToque < 300) {
+                activos.forEach(o => { o.quaternion.identity(); o.scale.setScalar(1); });
+            }
+            ultimoToque = ahora;
+        });
+
+        // ---------------------------------------------------------------
+        // 3) Panel de diagnóstico (oculto; ábrelo con ?debug=1 al final del enlace para verlo)
+        // ---------------------------------------------------------------
+        const DEBUG = location.search.includes('debug=1');
+        const archivos = {   // nombre del animal -> nombre del archivo .glb
+            mariposa: 'mariposa', pez: 'pez', conejo: 'conejo',
+            colibri: 'colibri', tortuga: 'tortuga', gorrion: 'gorrion'
+        };
+        const panel = document.getElementById('debug');
+        const estado = {};
+        const visibles = new Set();
+        if (!DEBUG) panel.style.display = 'none';
+
+        function pintar() {
+            const lineas = Object.keys(archivos).map(a => a + ': ' + (estado[a] || '...'));
+            lineas.push('VIENDO: ' + (visibles.size ? [...visibles].join(', ') : 'nada'));
+            panel.textContent = lineas.join('\n');
+        }
+
+        async function revisar(a) {
+            let patt, glb;
+            try {
+                const r = await fetch('./markers/' + a + '.patt', { cache: 'no-store' });
+                const t = await r.text();
+                patt = (r.ok && /^\s*\d/.test(t)) ? 'patt OK' : 'patt MAL (' + r.status + ')';
+            } catch (e) { patt = 'patt ERROR'; }
+            try {
+                const r = await fetch('./models/' + archivos[a] + '.glb', { cache: 'no-store' });
+                const b = new Uint8Array((await r.arrayBuffer()).slice(0, 4));
+                glb = (r.ok && String.fromCharCode(...b) === 'glTF') ? 'glb OK' : 'glb MAL (' + r.status + ')';
+            } catch (e) { glb = 'glb ERROR'; }
+            estado[a] = patt + ' | ' + glb;
+            pintar();
+        }
+        Object.keys(archivos).forEach(revisar);
+
+        window.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('a-marker').forEach(m => {
+                const nombre = m.getAttribute('data-name');
+                const contenedor = m.querySelector('.contenedor');
+                m.addEventListener('markerFound', () => {
+                    visibles.add(nombre); activos.add(contenedor.object3D); pintar();
+                });
+                m.addEventListener('markerLost', () => {
+                    visibles.delete(nombre); activos.delete(contenedor.object3D); pintar();
+                });
+            });
+            document.querySelectorAll('a-entity[gltf-model]').forEach(e => {
+                e.addEventListener('model-error', () => {
+                    const n = e.closest('a-marker').getAttribute('data-name');
+                    estado[n] = (estado[n] || '') + ' | MODELO NO CARGÓ';
+                    pintar();
+                });
+            });
+            pintar();
+        });
+    </script>
+
+</body>
+</html>
